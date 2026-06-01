@@ -1,0 +1,46 @@
+// Prisma schema for Podcast Insight Extractor.
+// Postgres (Neon in production; use the same DATABASE_URL locally).
+// JSON (insights) is stored as a String so the schema is DB-portable.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// Cached analysis per video. Keyed by videoId so repeat requests are free.
+model Episode {
+  id         String   @id @default(cuid())
+  videoId    String   @unique
+  url        String
+  title      String
+  channel    String
+  thumbnail  String?
+  transcript String // full caption text
+  insights   String? // JSON-encoded InsightResult (null until analyzed)
+  model      String? // which Claude model produced the insights
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  jobs Job[]
+}
+
+/// One processing request. Tracks status for polling.
+model Job {
+  id        String   @id @default(cuid())
+  videoId   String
+  url       String
+  status    String   @default("pending") // pending | processing | done | error | needs_audio
+  style     String   @default("A") // which insight depth/style the user requested
+  error     String?
+  userId    String? // for future auth/attribution
+  episodeId String?
+  episode   Episode? @relation(fields: [episodeId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([videoId])
+}
