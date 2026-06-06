@@ -46,7 +46,16 @@ export default function Home() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [top, setTop] = useState<TopItem[]>([]);
+  const [openInsights, setOpenInsights] = useState<Set<number>>(new Set());
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const toggleInsight = (i: number) =>
+    setOpenInsights((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
 
   // Turnstile token (only meaningful when a site key is configured).
   const [token, setToken] = useState("");
@@ -89,6 +98,7 @@ export default function Home() {
       if (pollRef.current) clearTimeout(pollRef.current);
       setError(null);
       setJob(null);
+      setOpenInsights(new Set());
       setSubmitting(true);
       try {
         const res = await fetch("/api/jobs", {
@@ -222,20 +232,65 @@ export default function Home() {
 
           {insights && (
             <div className="mt-6">
-              <p className="text-sm leading-relaxed text-neutral-700 dark:text-neutral-300">
+              <p className="text-[15px] leading-relaxed text-neutral-700 dark:text-neutral-300">
                 {insights.summary}
               </p>
-              <h3 className="mt-6 text-xs font-semibold uppercase tracking-wide text-neutral-400">
-                Key insights
-              </h3>
-              <ol className="mt-3 space-y-4">
-                {insights.insights.map((ins, i) => (
-                  <li key={i} className="border-l-2 border-neutral-200 pl-4 dark:border-neutral-800">
-                    <p className="font-medium">{ins.title}</p>
-                    <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">{ins.detail}</p>
-                  </li>
-                ))}
-              </ol>
+
+              <div className="mt-6 flex items-center justify-between">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
+                  Key insights
+                </h3>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setOpenInsights((prev) =>
+                      prev.size === insights.insights.length
+                        ? new Set()
+                        : new Set(insights.insights.map((_, i) => i)),
+                    )
+                  }
+                  className="text-xs font-medium text-neutral-500 hover:text-neutral-900 dark:hover:text-white"
+                >
+                  {openInsights.size === insights.insights.length ? "Collapse all" : "Expand all"}
+                </button>
+              </div>
+
+              {/* Tappable headlines — expand only what you want to read. */}
+              <ul className="mt-3 divide-y divide-neutral-200 dark:divide-neutral-800">
+                {insights.insights.map((ins, i) => {
+                  const open = openInsights.has(i);
+                  return (
+                    <li key={i}>
+                      <button
+                        type="button"
+                        onClick={() => toggleInsight(i)}
+                        aria-expanded={open}
+                        className="flex w-full items-start gap-3 py-3 text-left"
+                      >
+                        <span className="mt-0.5 w-4 shrink-0 text-sm font-semibold text-neutral-400">
+                          {i + 1}
+                        </span>
+                        <span className="flex-1 text-[15px] font-medium leading-snug">
+                          {ins.title}
+                        </span>
+                        <span
+                          className={`mt-1 shrink-0 text-neutral-400 transition-transform ${
+                            open ? "rotate-180" : ""
+                          }`}
+                          aria-hidden
+                        >
+                          ▾
+                        </span>
+                      </button>
+                      {open && (
+                        <p className="pb-4 pl-7 pr-2 text-[15px] leading-relaxed text-neutral-600 dark:text-neutral-400">
+                          {ins.detail}
+                        </p>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
             </div>
           )}
         </section>
