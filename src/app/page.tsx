@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { STYLES, DEFAULT_STYLE, type StyleId } from "@/lib/styles";
+import { TurnstileWidget } from "./TurnstileWidget";
 
 type Insight = { title: string; detail: string };
 type Episode = {
@@ -18,6 +19,14 @@ type JobResponse = {
   error: string | null;
   episode: Episode | null;
 };
+type TopItem = {
+  videoId: string;
+  url: string;
+  title: string;
+  channel: string;
+  thumbnail: string | null;
+  count: number;
+};
 
 const STATUS_LABEL: Record<JobResponse["status"], string> = {
   pending: "Queued…",
@@ -28,29 +37,55 @@ const STATUS_LABEL: Record<JobResponse["status"], string> = {
   rate_limited: "Daily limit reached",
 };
 
+const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
+
 export default function Home() {
   const [url, setUrl] = useState("");
   const [style, setStyle] = useState<StyleId>(DEFAULT_STYLE);
   const [job, setJob] = useState<JobResponse | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [top, setTop] = useState<TopItem[]>([]);
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const poll = useCallback((jobId: string) => {
-    const tick = async () => {
-      const res = await fetch(`/api/jobs/${jobId}`);
-      const data: JobResponse = await res.json();
-      setJob(data);
-      if (data.status === "pending" || data.status === "processing") {
-        pollRef.current = setTimeout(tick, 2000);
-      }
-    };
-    tick();
+  // Turnstile token (only meaningful when a site key is configured).
+  const [token, setToken] = useState("");
+  const [tokenNonce, setTokenNonce] = useState(0);
+  const onToken = useCallback((t: string) => setToken(t), []);
+
+  const loadTop = useCallback(async () => {
+    try {
+      const res = await fetch("/api/top");
+      const data = await res.json();
+      setTop(data.top ?? []);
+    } catch {
+      /* non-critical */
+    }
   }, []);
 
-  const onSubmit = useCallback(
-    async (e: React.FormEvent) => {
-      e.preventDefault();
+  useEffect(() => {
+    loadTop();
+  }, [loadTop]);
+
+  const poll = useCallback(
+    (jobId: string) => {
+      const tick = async () => {
+        const res = await fetch(`/api/jobs/${jobId}`);
+        const data: JobResponse = await res.json();
+        setJob(data);
+        if (data.status === "pending" || data.status === "processing") {
+          pollRef.current = setTimeout(tick, 2000);
+        } else if (data.status === "done") {
+          loadTop(); // refresh the weekly leaderboard
+        }
+      };
+      tick();
+    },
+    [loadTop],
+  );
+
+  const analyze = useCallback(
+    async (targetUrl: string) => {
       if (pollRef.current) clearTimeout(pollRef.current);
       setError(null);
       setJob(null);
@@ -59,7 +94,7 @@ export default function Home() {
         const res = await fetch("/api/jobs", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url, style }),
+          body: JSON.stringify({ url: targetUrl, style, turnstileToken: token }),
         });
         const data = await res.json();
         if (!res.ok) {
@@ -71,13 +106,27 @@ export default function Home() {
         setError("Network error. Please try again.");
       } finally {
         setSubmitting(false);
+        // Refresh the Turnstile token so the next analysis has a fresh one.
+        if (TURNSTILE_SITE_KEY) {
+          setToken("");
+          setTokenNonce((n) => n + 1);
+        }
       }
     },
-    [url, style, poll],
+    [style, token, poll],
+  );
+
+  const onSubmit = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      analyze(url);
+    },
+    [analyze, url],
   );
 
   const insights = job?.episode?.insights;
   const busy = job?.status === "pending" || job?.status === "processing";
+  const needsToken = !!TURNSTILE_SITE_KEY && !token;
 
   return (
     <main className="mx-auto max-w-2xl px-5 py-12">
@@ -97,7 +146,7 @@ export default function Home() {
         />
         <button
           type="submit"
-          disabled={submitting || busy}
+          disabled={submitting || busy || needsToken}
           className="rounded-lg bg-neutral-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-white dark:text-black"
         >
           {submitting ? "…" : "Analyze"}
@@ -122,9 +171,7 @@ export default function Home() {
                 }`}
               >
                 <span className="block text-sm font-medium">{s.label}</span>
-                <span
-                  className={`block text-xs ${active ? "opacity-80" : "text-neutral-500"}`}
-                >
+                <span className={`block text-xs ${active ? "opacity-80" : "text-neutral-500"}`}>
                   {s.tagline}
                 </span>
               </button>
@@ -132,6 +179,10 @@ export default function Home() {
           })}
         </div>
       </fieldset>
+
+      {TURNSTILE_SITE_KEY && (
+        <TurnstileWidget key={tokenNonce} siteKey={TURNSTILE_SITE_KEY} onToken={onToken} />
+      )}
 
       {error && <p className="mt-4 text-sm text-red-600">{error}</p>}
 
@@ -141,11 +192,7 @@ export default function Home() {
             <header className="flex items-start gap-3">
               {job.episode.thumbnail && (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={job.episode.thumbnail}
-                  alt=""
-                  className="h-16 w-28 rounded object-cover"
-                />
+                <img src={job.episode.thumbnail} alt="" className="h-16 w-28 rounded object-cover" />
               )}
               <div>
                 <h2 className="font-semibold leading-snug">{job.episode.title}</h2>
@@ -155,9 +202,7 @@ export default function Home() {
           )}
 
           {busy && (
-            <p className="mt-6 animate-pulse text-sm text-neutral-500">
-              {STATUS_LABEL[job.status]}
-            </p>
+            <p className="mt-6 animate-pulse text-sm text-neutral-500">{STATUS_LABEL[job.status]}</p>
           )}
 
           {job.status === "needs_audio" && (
@@ -187,9 +232,7 @@ export default function Home() {
                 {insights.insights.map((ins, i) => (
                   <li key={i} className="border-l-2 border-neutral-200 pl-4 dark:border-neutral-800">
                     <p className="font-medium">{ins.title}</p>
-                    <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
-                      {ins.detail}
-                    </p>
+                    <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">{ins.detail}</p>
                   </li>
                 ))}
               </ol>
@@ -197,6 +240,108 @@ export default function Home() {
           )}
         </section>
       )}
+
+      {/* Top podcasts this week */}
+      {top.length > 0 && (
+        <section className="mt-12 border-t border-neutral-200 pt-8 dark:border-neutral-800">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
+            Top podcasts this week
+          </h2>
+          <ol className="mt-4 space-y-3">
+            {top.map((t, i) => (
+              <li key={t.videoId}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUrl(t.url);
+                    analyze(t.url);
+                  }}
+                  className="flex w-full items-center gap-3 rounded-lg p-2 text-left hover:bg-neutral-100 dark:hover:bg-neutral-900"
+                >
+                  <span className="w-4 text-sm font-semibold text-neutral-400">{i + 1}</span>
+                  {t.thumbnail && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={t.thumbnail} alt="" className="h-10 w-16 rounded object-cover" />
+                  )}
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium">{t.title}</span>
+                    <span className="block truncate text-xs text-neutral-500">{t.channel}</span>
+                  </span>
+                  <span className="text-xs text-neutral-400">{t.count}×</span>
+                </button>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
+
+      {/* Feedback */}
+      <FeedbackSection />
     </main>
+  );
+}
+
+function FeedbackSection() {
+  const [message, setMessage] = useState("");
+  const [email, setEmail] = useState("");
+  const [state, setState] = useState<"idle" | "sending" | "sent" | "error">("idle");
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!message.trim()) return;
+    setState("sending");
+    try {
+      const res = await fetch("/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message, email }),
+      });
+      setState(res.ok ? "sent" : "error");
+      if (res.ok) {
+        setMessage("");
+        setEmail("");
+      }
+    } catch {
+      setState("error");
+    }
+  };
+
+  return (
+    <section className="mt-12 border-t border-neutral-200 pt-8 dark:border-neutral-800">
+      <h2 className="text-xs font-semibold uppercase tracking-wide text-neutral-400">Feedback</h2>
+      {state === "sent" ? (
+        <p className="mt-4 text-sm text-green-600">Thanks for the feedback! 🙏</p>
+      ) : (
+        <form onSubmit={submit} className="mt-4 space-y-2">
+          <textarea
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            placeholder="What do you think? Bugs, ideas, requests…"
+            rows={3}
+            maxLength={2000}
+            className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm outline-none focus:border-neutral-900 dark:border-neutral-700 dark:bg-neutral-900"
+          />
+          <div className="flex gap-2">
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="Email (optional)"
+              className="flex-1 rounded-lg border border-neutral-300 px-3 py-2 text-sm outline-none focus:border-neutral-900 dark:border-neutral-700 dark:bg-neutral-900"
+            />
+            <button
+              type="submit"
+              disabled={state === "sending" || !message.trim()}
+              className="rounded-lg bg-neutral-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-white dark:text-black"
+            >
+              {state === "sending" ? "…" : "Send"}
+            </button>
+          </div>
+          {state === "error" && (
+            <p className="text-sm text-red-600">Could not send. Please try again.</p>
+          )}
+        </form>
+      )}
+    </section>
   );
 }

@@ -4,6 +4,7 @@ import { parseVideoId, fetchVideoMeta } from "@/lib/youtube";
 import { processJob } from "@/lib/worker";
 import { parseInsightsMap } from "@/lib/insights";
 import { DEFAULT_STYLE, isStyleId } from "@/lib/styles";
+import { verifyTurnstile, clientIp } from "@/lib/turnstile";
 
 // The background worker (caption fetch + LLM call) runs via after() within
 // this function's lifetime, so give it room. 60s is the Vercel Hobby ceiling.
@@ -14,11 +15,17 @@ export const maxDuration = 60;
  * Returns { jobId, cached } immediately; processing runs via after().
  */
 export async function POST(request: Request) {
-  let body: { url?: string; style?: string };
+  let body: { url?: string; style?: string; turnstileToken?: string };
   try {
     body = await request.json();
   } catch {
     return Response.json({ error: "Invalid JSON body." }, { status: 400 });
+  }
+
+  // Bot protection (no-op when Turnstile isn't configured).
+  const human = await verifyTurnstile(body.turnstileToken, clientIp(request));
+  if (!human) {
+    return Response.json({ error: "Verification failed. Please try again." }, { status: 403 });
   }
 
   const url = body.url?.trim();

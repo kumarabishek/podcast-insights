@@ -43,4 +43,13 @@ model Job {
   updatedAt DateTime @updatedAt
 
   @@index([videoId])
+  @@index([createdAt])
+}
+
+/// User-submitted feedback.
+model Feedback {
+  id        String   @id @default(cuid())
+  message   String
+  email     String?
+  createdAt DateTime @default(now())
 }
