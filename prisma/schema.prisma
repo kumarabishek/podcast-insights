@@ -35,6 +35,8 @@ model Job {
   url       String
   status    String   @default("pending") // pending | processing | done | error | needs_audio
   style     String   @default("A") // which insight depth/style the user requested
+  cached    Boolean  @default(false) // true if served from cache (free — doesn't count toward rate limit)
+  ip        String? // client IP, for per-IP rate limiting
   error     String?
   userId    String? // for future auth/attribution
   episodeId String?
@@ -44,6 +46,7 @@ model Job {
 
   @@index([videoId])
   @@index([createdAt])
+  @@index([ip, cached, createdAt])
 }
 
 /// User-submitted feedback.
