@@ -20,6 +20,11 @@ const InsightSchema = z.object({
   detail: z
     .string()
     .describe("1-3 sentences explaining the insight, takeaway, or claim and why it matters."),
+  startTime: z
+    .number()
+    .optional()
+    .describe("Seconds into the episode where this insight starts being discussed."),
+  endTime: z.number().optional().describe("Seconds into the episode where the discussion ends."),
 });
 
 const InsightResultSchema = z.object({
@@ -63,6 +68,13 @@ Rules:
 - Skip ads, sponsorships, and small talk.
 - 6-12 insights, ordered by significance.`,
 };
+
+// Appended to every prompt. Drives the per-insight time range.
+const TIMESTAMP_NOTE = `The transcript is annotated with [m:ss] timestamps marking when each part was spoken. For every insight, also set startTime and endTime to the integer number of SECONDS marking the span of the episode where that insight is discussed, using the surrounding timestamps (e.g. [12:30] → 750). If the transcript has no timestamps, omit startTime and endTime.`;
+
+function promptFor(style: StyleId): string {
+  return `${PROMPTS[style]}\n\n${TIMESTAMP_NOTE}`;
+}
 
 /** Insights are stored per video keyed by style: { A: {...}, B: {...} }. */
 export type InsightsByStyle = Partial<Record<StyleId, InsightResult>>;
@@ -147,9 +159,14 @@ const GEMINI_SCHEMA = {
       type: Type.ARRAY,
       items: {
         type: Type.OBJECT,
-        properties: { title: { type: Type.STRING }, detail: { type: Type.STRING } },
+        properties: {
+          title: { type: Type.STRING },
+          detail: { type: Type.STRING },
+          startTime: { type: Type.INTEGER },
+          endTime: { type: Type.INTEGER },
+        },
         required: ["title", "detail"],
-        propertyOrdering: ["title", "detail"],
+        propertyOrdering: ["title", "detail", "startTime", "endTime"],
       },
     },
   },
@@ -186,7 +203,7 @@ async function extractWithGemini(
           model,
           contents: buildContext(transcript, meta),
           config: {
-            systemInstruction: PROMPTS[style],
+            systemInstruction: promptFor(style),
             responseMimeType: "application/json",
             responseSchema: GEMINI_SCHEMA,
           },
@@ -232,7 +249,7 @@ async function extractWithClaude(
         text: buildContext(transcript, meta),
         cache_control: { type: "ephemeral" },
       },
-      { type: "text", text: PROMPTS[style] },
+      { type: "text", text: promptFor(style) },
     ],
     output_config: { format: zodOutputFormat(InsightResultSchema) },
     messages: [

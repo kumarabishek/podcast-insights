@@ -4,7 +4,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { STYLES, DEFAULT_STYLE, type StyleId } from "@/lib/styles";
 import { TurnstileWidget } from "./TurnstileWidget";
 
-type Insight = { title: string; detail: string };
+type Insight = { title: string; detail: string; startTime?: number; endTime?: number };
+
+function fmtTime(s: number): string {
+  const sec = Math.max(0, Math.floor(s));
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const ss = String(sec % 60).padStart(2, "0");
+  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
+}
 type Episode = {
   videoId: string;
   url: string;
@@ -259,13 +267,22 @@ export default function Home() {
               <ul className="mt-3 divide-y divide-neutral-200 dark:divide-neutral-800">
                 {insights.insights.map((ins, i) => {
                   const open = openInsights.has(i);
+                  const vid = job.episode?.videoId;
+                  const hasTime = ins.startTime != null && vid;
                   return (
                     <li key={i}>
-                      <button
-                        type="button"
-                        onClick={() => toggleInsight(i)}
+                      <div
+                        role="button"
+                        tabIndex={0}
                         aria-expanded={open}
-                        className="flex w-full items-start gap-3 py-3 text-left"
+                        onClick={() => toggleInsight(i)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            toggleInsight(i);
+                          }
+                        }}
+                        className="flex w-full cursor-pointer items-start gap-3 py-3 text-left"
                       >
                         <span className="mt-0.5 w-4 shrink-0 text-sm font-semibold text-neutral-400">
                           {i + 1}
@@ -273,6 +290,19 @@ export default function Home() {
                         <span className="flex-1 text-[15px] font-medium leading-snug">
                           {ins.title}
                         </span>
+                        {hasTime && (
+                          <a
+                            href={`https://www.youtube.com/watch?v=${vid}&t=${Math.floor(ins.startTime!)}s`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            title="Watch this part on YouTube"
+                            className="mt-0.5 shrink-0 whitespace-nowrap text-xs font-medium text-blue-600 hover:underline dark:text-blue-400"
+                          >
+                            ▶ {fmtTime(ins.startTime!)}
+                            {ins.endTime != null ? `–${fmtTime(ins.endTime)}` : ""}
+                          </a>
+                        )}
                         <span
                           className={`mt-1 shrink-0 text-neutral-400 transition-transform ${
                             open ? "rotate-180" : ""
@@ -281,7 +311,7 @@ export default function Home() {
                         >
                           ▾
                         </span>
-                      </button>
+                      </div>
                       {open && (
                         <p className="pb-4 pl-7 pr-2 text-[15px] leading-relaxed text-neutral-600 dark:text-neutral-400">
                           {ins.detail}

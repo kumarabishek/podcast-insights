@@ -17,6 +17,39 @@ export async function fetchCaptions(videoId: string): Promise<CaptionResult> {
   return fetchViaLibrary(videoId);
 }
 
+/**
+ * Build a transcript annotated with [m:ss] timestamps (one line per ~30s
+ * bucket) so the LLM can attribute each insight to a span of the episode.
+ * Returns "" if there are no timestamped segments.
+ */
+export function buildTimestampedTranscript(
+  segments: { text: string; offset: number }[],
+): string {
+  if (!segments.length) return "";
+  const BUCKET = 30; // seconds per labelled line
+  const lines: string[] = [];
+  let bucketStart = Math.floor(segments[0].offset / 1000);
+  let buf: string[] = [];
+
+  for (const s of segments) {
+    const t = Math.floor(s.offset / 1000);
+    if (t - bucketStart >= BUCKET && buf.length) {
+      lines.push(`[${clock(bucketStart)}] ${buf.join(" ")}`);
+      buf = [];
+      bucketStart = t;
+    }
+    buf.push(s.text);
+  }
+  if (buf.length) lines.push(`[${clock(bucketStart)}] ${buf.join(" ")}`);
+  return lines.join("\n");
+}
+
+function clock(totalSeconds: number): string {
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
 // --- Supadata (production: works from cloud IPs) -----------------------------
 
 const SUPADATA_BASE = "https://api.supadata.ai/v1/transcript";

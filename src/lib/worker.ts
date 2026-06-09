@@ -1,5 +1,5 @@
 import { prisma } from "./db";
-import { fetchCaptions } from "./captions";
+import { fetchCaptions, buildTimestampedTranscript } from "./captions";
 import { extractInsights, parseInsightsMap, isRateLimitError } from "./insights";
 import { isStyleId, type StyleId } from "./styles";
 
@@ -30,7 +30,8 @@ export async function processJob(jobId: string): Promise<void> {
         await prisma.job.update({ where: { id: jobId }, data: { status, error: captions.message } });
         return;
       }
-      transcript = captions.text;
+      // Prefer the timestamp-annotated transcript so insights get time ranges.
+      transcript = buildTimestampedTranscript(captions.segments) || captions.text;
       await prisma.episode.update({ where: { videoId: job.videoId }, data: { transcript } });
     }
 
