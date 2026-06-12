@@ -18,10 +18,10 @@ const ANTHROPIC_MODEL = process.env.MODEL ?? "claude-sonnet-4-6";
 // Schema the MODEL fills. It returns a verbatim `quote`; we compute the
 // timestamp from it ourselves (the model is unreliable at second math).
 const InsightSchema = z.object({
-  title: z.string().describe("A short, punchy headline for the insight (≤ 12 words)."),
+  title: z.string().describe("A short, punchy headline (follow the length cap in the instructions)."),
   detail: z
     .string()
-    .describe("1-3 sentences explaining the insight, takeaway, or claim and why it matters."),
+    .describe("Explain the insight; follow the length guidance in the instructions — be concise, no filler."),
   quote: z
     .string()
     .optional()
@@ -31,7 +31,7 @@ const InsightSchema = z.object({
 });
 
 const InsightResultSchema = z.object({
-  summary: z.string().describe("A 2-3 sentence TL;DR of what the episode is about."),
+  summary: z.string().describe("A TL;DR of the episode (follow the length cap in the instructions)."),
   insights: z
     .array(InsightSchema)
     .describe("The most important, non-obvious insights and takeaways, ordered by significance."),
@@ -45,32 +45,40 @@ export type InsightResult = { summary: string; insights: Insight[] };
 const PROMPTS: Record<StyleId, string> = {
   A: `You are an expert analyst who distills podcast conversations into actionable takeaways.
 
-Extract the most useful, applicable lessons a motivated listener could act on. Prioritize: concrete advice, decision-making heuristics, mental models, and "do this / avoid that" guidance. For each takeaway, make the title an imperative or a crisp claim, and use the detail to explain the reasoning and when it applies.
+Extract the most useful, applicable lessons a listener could act on: concrete advice, decision heuristics, mental models, "do this / avoid that" guidance.
+
+Length (strict):
+- summary: 2 tight sentences, max ~40 words.
+- title: an imperative or crisp claim, ≤ 8 words.
+- detail: 1-2 sentences, ≤ 30 words. Lead with the takeaway. No warm-up clauses, no restating the title, no "the speaker says".
 
 Rules:
-- Favor what's actionable and non-obvious over general recap.
-- Skip ads, intros, tangents, and pleasantries.
-- Don't pad. Surface only takeaways that genuinely earn a spot — typically 5-10.
-- Be specific: if a number, framework, or example was given, include it.`,
+- Favor what's actionable and non-obvious over recap. Keep specific numbers, names, and frameworks.
+- Skip ads, intros, tangents, pleasantries. Don't pad — only takeaways that earn a spot (typically 5-10).`,
 
   B: `You are a sharp analyst who extracts the full substance of a podcast so a reader never needs to listen to it.
 
-Capture the real intellectual content of the conversation: the central arguments and how they were defended, surprising or counterintuitive claims, supporting data and examples, mental models, and points of disagreement or tension. Preserve nuance — if a claim was hedged or contested, say so. Attribute notable positions to who argued them when it matters.
+Capture the real intellectual content: the central arguments and how they were defended, surprising or counterintuitive claims, supporting data and examples, mental models, and points of disagreement. Preserve nuance — note hedged or contested claims. Attribute notable positions to who argued them when it matters.
+
+Length:
+- summary: 3 sentences max.
+- detail: as long as the idea genuinely needs — but every sentence must carry new information. Cut filler, not depth. No preamble, no "the speaker discusses", no restating the question.
 
 Rules:
-- Go for depth and faithfulness over brevity; capture what was actually said, not generic summaries.
-- Distinguish strong claims from speculation.
-- Skip ads and filler, but don't flatten genuine complexity.
-- Aim for 8-15 insights depending on how substantive the episode is.`,
+- Depth and faithfulness over brevity; capture what was actually said. Distinguish strong claims from speculation.
+- Skip ads and filler. Aim for 8-15 insights depending on substance.`,
 
   C: `You are an editor who writes a smart briefing on a podcast episode for a busy reader.
 
-Open with a tight TL;DR of what the episode covers and why someone might care. Then surface the key insights grouped naturally by theme. Highlight the genuinely memorable moments: standout claims, surprising facts, strong opinions, and notable people, books, tools, or companies mentioned.
+Open with a tight TL;DR, then surface the key insights. Highlight the memorable moments: standout claims, surprising facts, strong opinions, and notable people, books, tools, or companies mentioned.
+
+Length (strict):
+- summary: 2 sentences — what it covers and why it matters.
+- title: ≤ 8 words.
+- detail: 1-2 sentences, ≤ 30 words. Scannable and engaging, no filler.
 
 Rules:
-- Keep it scannable and engaging — this is a briefing, not a transcript.
-- Lead with substance a reader would find interesting or share-worthy.
-- Skip ads, sponsorships, and small talk.
+- Lead with share-worthy substance. Skip ads, sponsorships, small talk.
 - 6-12 insights, ordered by significance.`,
 };
 
