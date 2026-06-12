@@ -184,7 +184,7 @@ export default function Home() {
   const needsToken = !!TURNSTILE_SITE_KEY && !token;
 
   return (
-    <main className="mx-auto max-w-2xl px-5 py-12">
+    <main className={`mx-auto max-w-2xl px-5 py-12 ${insights ? "pb-40" : ""}`}>
       <h1 className="text-3xl font-bold tracking-tight">Podcast Insights Extractor</h1>
       <p className="mt-2 text-sm text-neutral-500">
         Paste a YouTube podcast link to get the key takeaways.
@@ -359,54 +359,6 @@ export default function Home() {
               </ul>
             </div>
           )}
-
-          {insights && (
-            <div className="mt-10 border-t border-neutral-200 pt-6 dark:border-neutral-800">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
-                Ask about this episode
-              </h3>
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  ask();
-                }}
-                className="mt-3 flex gap-2"
-              >
-                <input
-                  value={question}
-                  onChange={(e) => setQuestion(e.target.value)}
-                  placeholder="e.g. What did they say about pricing?"
-                  maxLength={500}
-                  className="flex-1 rounded-lg border border-neutral-300 px-3 py-2 text-sm outline-none focus:border-neutral-900 dark:border-neutral-700 dark:bg-neutral-900"
-                />
-                <button
-                  type="submit"
-                  disabled={asking || needsToken || !question.trim()}
-                  className="rounded-lg bg-neutral-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-white dark:text-black"
-                >
-                  {asking ? "…" : "Ask"}
-                </button>
-              </form>
-              {askError && <p className="mt-3 text-sm text-red-600">{askError}</p>}
-              {answer && (
-                <div className="mt-4">
-                  <p className="text-[15px] leading-relaxed text-neutral-700 dark:text-neutral-300">
-                    {answer.answer}
-                  </p>
-                  {answer.startTime != null && job.episode && (
-                    <a
-                      href={`https://www.youtube.com/watch?v=${job.episode.videoId}&t=${Math.floor(answer.startTime)}s`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="mt-2 inline-block text-xs font-medium text-blue-600 hover:underline dark:text-blue-400"
-                    >
-                      ▶ Jump to {fmtTime(answer.startTime)}
-                    </a>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
         </section>
       )}
 
@@ -446,6 +398,72 @@ export default function Home() {
 
       {/* Feedback */}
       <FeedbackSection />
+
+      {/* Sticky "Ask about this episode" bar — appears once a result loads */}
+      {insights && job?.episode && (
+        <div
+          className="fixed inset-x-0 bottom-0 z-40 border-t border-neutral-200 bg-white/95 backdrop-blur dark:border-neutral-800 dark:bg-black/95"
+          style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+        >
+          <div className="mx-auto max-w-2xl px-5">
+            {(asking || askError || answer) && (
+              <div className="max-h-[40vh] overflow-y-auto border-b border-neutral-100 py-3 dark:border-neutral-900">
+                {asking && (
+                  <p className="animate-pulse text-sm text-neutral-500">Thinking…</p>
+                )}
+                {askError && <p className="text-sm text-red-600">{askError}</p>}
+                {answer && (
+                  <div className="relative pr-6">
+                    <button
+                      type="button"
+                      onClick={() => setAnswer(null)}
+                      aria-label="Dismiss answer"
+                      className="absolute right-0 top-0 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200"
+                    >
+                      ✕
+                    </button>
+                    <p className="text-[15px] leading-relaxed text-neutral-700 dark:text-neutral-300">
+                      {answer.answer}
+                    </p>
+                    {answer.startTime != null && (
+                      <a
+                        href={`https://www.youtube.com/watch?v=${job.episode.videoId}&t=${Math.floor(answer.startTime)}s`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-2 inline-block text-xs font-medium text-blue-600 hover:underline dark:text-blue-400"
+                      >
+                        ▶ Jump to {fmtTime(answer.startTime)}
+                      </a>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                ask();
+              }}
+              className="flex gap-2 py-3"
+            >
+              <input
+                value={question}
+                onChange={(e) => setQuestion(e.target.value)}
+                placeholder="Ask about this episode…"
+                maxLength={500}
+                className="flex-1 rounded-lg border border-neutral-300 px-3 py-2 text-sm outline-none focus:border-neutral-900 dark:border-neutral-700 dark:bg-neutral-900"
+              />
+              <button
+                type="submit"
+                disabled={asking || needsToken || !question.trim()}
+                className="rounded-lg bg-neutral-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-white dark:text-black"
+              >
+                {asking ? "…" : "Ask"}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

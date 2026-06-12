@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -16,6 +16,12 @@ export const metadata: Metadata = {
   title: "Podcast Insights Extractor",
   description:
     "Paste a YouTube podcast link and get the key takeaways in seconds — actionable, in-depth, or brief. Skip the hours of listening.",
+};
+
+// Resize page content when the on-screen keyboard opens, so a fixed bottom
+// bar (the Ask box) stays above the keyboard on mobile.
+export const viewport: Viewport = {
+  interactiveWidget: "resizes-content",
 };
 
 export default function RootLayout({
