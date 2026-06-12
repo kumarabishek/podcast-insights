@@ -14,6 +14,14 @@ export const maxDuration = 60;
 // and never count. Override with DAILY_IP_LIMIT.
 const DAILY_IP_LIMIT = Number(process.env.DAILY_IP_LIMIT ?? 3);
 
+// IPs exempt from the rate limit (comma-separated in RATE_LIMIT_EXEMPT_IPS).
+const EXEMPT_IPS = new Set(
+  (process.env.RATE_LIMIT_EXEMPT_IPS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean),
+);
+
 /**
  * POST /api/jobs — submit a YouTube URL for insight extraction.
  * Returns { jobId, cached } immediately; processing runs via after().
@@ -53,7 +61,7 @@ export async function POST(request: Request) {
   }
 
   // Rate limit: cap NEW analyses per IP per rolling 24h (cache hits excluded).
-  if (ip && DAILY_IP_LIMIT > 0) {
+  if (ip && DAILY_IP_LIMIT > 0 && !EXEMPT_IPS.has(ip)) {
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const used = await prisma.job.count({
       where: { ip, cached: false, createdAt: { gte: since } },

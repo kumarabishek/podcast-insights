@@ -1,11 +1,14 @@
+import { clientIp } from "@/lib/turnstile";
+
 export const dynamic = "force-dynamic";
 
 /**
  * Diagnostic: reports which env vars the running deployment can see (booleans
- * only — never the values). Visit /api/health on the live URL.
+ * only — never the values) plus the caller's IP. Visit /api/health on the live URL.
  */
-export async function GET() {
+export async function GET(request: Request) {
   return Response.json({
+    yourIp: clientIp(request) ?? null,
     provider: process.env.LLM_PROVIDER ?? (process.env.GEMINI_API_KEY ? "gemini" : "anthropic"),
     hasGemini: !!process.env.GEMINI_API_KEY,
     hasAnthropic: !!process.env.ANTHROPIC_API_KEY,
