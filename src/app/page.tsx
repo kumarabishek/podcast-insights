@@ -247,10 +247,14 @@ export default function Home() {
             <header className="flex items-start gap-3">
               {job.episode.thumbnail && (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={job.episode.thumbnail} alt="" className="h-16 w-28 rounded object-cover" />
+                <img
+                  src={job.episode.thumbnail}
+                  alt=""
+                  className="h-16 w-28 shrink-0 rounded object-cover"
+                />
               )}
-              <div>
-                <h2 className="font-semibold leading-snug">{job.episode.title}</h2>
+              <div className="min-w-0">
+                <h2 className="break-words font-semibold leading-snug">{job.episode.title}</h2>
                 <p className="text-sm text-neutral-500">{job.episode.channel}</p>
               </div>
             </header>
@@ -277,7 +281,7 @@ export default function Home() {
 
           {insights && (
             <div className="mt-6">
-              <p className="text-[15px] leading-relaxed text-neutral-700 dark:text-neutral-300">
+              <p className="break-words text-[15px] leading-relaxed text-neutral-700 dark:text-neutral-300">
                 {insights.summary}
               </p>
 
@@ -324,7 +328,7 @@ export default function Home() {
                         <span className="mt-0.5 w-4 shrink-0 text-sm font-semibold text-neutral-400">
                           {i + 1}
                         </span>
-                        <span className="flex-1 text-[15px] font-medium leading-snug">
+                        <span className="min-w-0 flex-1 break-words text-[15px] font-medium leading-snug">
                           {ins.title}
                         </span>
                         {hasTime && (
@@ -349,7 +353,7 @@ export default function Home() {
                         </span>
                       </div>
                       {open && (
-                        <p className="pb-4 pl-7 pr-2 text-[15px] leading-relaxed text-neutral-600 dark:text-neutral-400">
+                        <p className="break-words pb-4 pl-7 pr-2 text-[15px] leading-relaxed text-neutral-600 dark:text-neutral-400">
                           {ins.detail}
                         </p>
                       )}
@@ -422,7 +426,7 @@ export default function Home() {
                     >
                       ✕
                     </button>
-                    <p className="text-[15px] leading-relaxed text-neutral-700 dark:text-neutral-300">
+                    <p className="break-words text-[15px] leading-relaxed text-neutral-700 dark:text-neutral-300">
                       {answer.answer}
                     </p>
                     {answer.startTime != null && (
