@@ -121,6 +121,29 @@ function findQuoteSec(lines: TimedLine[], quoteNorm: string): number | null {
       if (`${lines[i].norm} ${lines[i + 1].norm}`.includes(short)) return lines[i].sec;
     }
   }
+
+  // 4) fuzzy: the window covering the most of the quote's words (≥60%).
+  // Tolerates minor paraphrasing while still landing on the right segment.
+  const qTokens = quoteNorm.split(" ").filter((w) => w.length >= 3);
+  if (qTokens.length >= 3) {
+    let bestSec = -1;
+    let bestScore = 0;
+    const consider = (text: string, sec: number) => {
+      const words = new Set(text.split(" "));
+      let hit = 0;
+      for (const t of qTokens) if (words.has(t)) hit++;
+      const score = hit / qTokens.length;
+      if (score > bestScore) {
+        bestScore = score;
+        bestSec = sec;
+      }
+    };
+    for (const l of lines) consider(l.norm, l.sec);
+    for (let i = 0; i < lines.length - 1; i++) {
+      consider(`${lines[i].norm} ${lines[i + 1].norm}`, lines[i].sec);
+    }
+    if (bestScore >= 0.6) return bestSec;
+  }
   return null;
 }
 
