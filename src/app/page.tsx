@@ -55,6 +55,10 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [top, setTop] = useState<TopItem[]>([]);
   const [openInsights, setOpenInsights] = useState<Set<number>>(new Set());
+  const [question, setQuestion] = useState("");
+  const [answer, setAnswer] = useState<{ answer: string; startTime: number | null } | null>(null);
+  const [asking, setAsking] = useState(false);
+  const [askError, setAskError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const toggleInsight = (i: number) =>
@@ -107,6 +111,9 @@ export default function Home() {
       setError(null);
       setJob(null);
       setOpenInsights(new Set());
+      setQuestion("");
+      setAnswer(null);
+      setAskError(null);
       setSubmitting(true);
       try {
         const res = await fetch("/api/jobs", {
@@ -141,6 +148,36 @@ export default function Home() {
     },
     [analyze, url],
   );
+
+  const ask = useCallback(async () => {
+    const q = question.trim();
+    const vid = job?.episode?.videoId;
+    if (!q || !vid) return;
+    setAsking(true);
+    setAskError(null);
+    setAnswer(null);
+    try {
+      const res = await fetch("/api/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ videoId: vid, question: q, turnstileToken: token }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setAskError(data.error ?? "Something went wrong.");
+        return;
+      }
+      setAnswer({ answer: data.answer, startTime: data.startTime ?? null });
+    } catch {
+      setAskError("Network error. Please try again.");
+    } finally {
+      setAsking(false);
+      if (TURNSTILE_SITE_KEY) {
+        setToken("");
+        setTokenNonce((n) => n + 1);
+      }
+    }
+  }, [question, job, token]);
 
   const insights = job?.episode?.insights;
   const busy = job?.status === "pending" || job?.status === "processing";
@@ -320,6 +357,54 @@ export default function Home() {
                   );
                 })}
               </ul>
+            </div>
+          )}
+
+          {insights && (
+            <div className="mt-10 border-t border-neutral-200 pt-6 dark:border-neutral-800">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
+                Ask about this episode
+              </h3>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  ask();
+                }}
+                className="mt-3 flex gap-2"
+              >
+                <input
+                  value={question}
+                  onChange={(e) => setQuestion(e.target.value)}
+                  placeholder="e.g. What did they say about pricing?"
+                  maxLength={500}
+                  className="flex-1 rounded-lg border border-neutral-300 px-3 py-2 text-sm outline-none focus:border-neutral-900 dark:border-neutral-700 dark:bg-neutral-900"
+                />
+                <button
+                  type="submit"
+                  disabled={asking || needsToken || !question.trim()}
+                  className="rounded-lg bg-neutral-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-white dark:text-black"
+                >
+                  {asking ? "…" : "Ask"}
+                </button>
+              </form>
+              {askError && <p className="mt-3 text-sm text-red-600">{askError}</p>}
+              {answer && (
+                <div className="mt-4">
+                  <p className="text-[15px] leading-relaxed text-neutral-700 dark:text-neutral-300">
+                    {answer.answer}
+                  </p>
+                  {answer.startTime != null && job.episode && (
+                    <a
+                      href={`https://www.youtube.com/watch?v=${job.episode.videoId}&t=${Math.floor(answer.startTime)}s`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-2 inline-block text-xs font-medium text-blue-600 hover:underline dark:text-blue-400"
+                    >
+                      ▶ Jump to {fmtTime(answer.startTime)}
+                    </a>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </section>

@@ -141,6 +141,15 @@ export function resolveInsightTimestamps(transcript: string, insights: Insight[]
   }
 }
 
+/** Locate a single verbatim quote in the timed transcript → seconds (or undefined). */
+function quoteToSeconds(transcript: string, quote: string | undefined): number | undefined {
+  if (!quote) return undefined;
+  const lines = parseTimedLines(transcript);
+  if (!lines.length) return undefined;
+  const sec = findQuoteSec(lines, normalizeText(quote));
+  return sec == null ? undefined : Math.min(sec, lines[lines.length - 1].sec);
+}
+
 /** Insights are stored per video keyed by style: { A: {...}, B: {...} }. */
 export type InsightsByStyle = Partial<Record<StyleId, InsightResult>>;
 
@@ -333,4 +342,96 @@ async function extractWithClaude(
     throw new Error(`Model did not return structured output (stop_reason: ${response.stop_reason}).`);
   }
   return { result: response.parsed_output, model: ANTHROPIC_MODEL };
+}
+
+// --- Q&A: ask a question about the video -------------------------------------
+
+const AnswerSchema = z.object({
+  answer: z
+    .string()
+    .describe(
+      "A concise, direct answer (2-4 sentences) based ONLY on the transcript. If the transcript doesn't address the question, clearly say it isn't covered.",
+    ),
+  quote: z
+    .string()
+    .optional()
+    .describe(
+      "A short verbatim phrase (5-12 words) copied EXACTLY from the transcript (same language, no [m:ss] marker, no paraphrase) marking where the answer is discussed. Omit if not tied to a specific moment.",
+    ),
+});
+
+export type AnswerResult = { answer: string; quote?: string; startTime?: number };
+
+const GEMINI_ANSWER_SCHEMA = {
+  type: Type.OBJECT,
+  properties: { answer: { type: Type.STRING }, quote: { type: Type.STRING } },
+  required: ["answer"],
+  propertyOrdering: ["answer", "quote"],
+};
+
+const ASK_SYSTEM = `You answer a user's question about a podcast episode using ONLY the provided transcript. Give a concise, direct answer. If the transcript does not address the question, clearly say it isn't covered in this episode — do not make up information.
+
+The transcript may be annotated with [m:ss] timestamps. Include a "quote": a short verbatim phrase (5-12 words) copied EXACTLY from the transcript (same language, no [m:ss] marker, no paraphrase) marking where the answer is discussed, so the user can jump to that moment. Omit the quote if the answer isn't tied to a specific moment.`;
+
+export async function answerQuestion(
+  transcript: string,
+  meta: { title: string; channel: string },
+  question: string,
+): Promise<{ result: AnswerResult; model: string }> {
+  const context = buildContext(transcript, meta);
+  let result: AnswerResult;
+  let model: string;
+
+  if (PROVIDER === "gemini") {
+    const models =
+      GEMINI_FALLBACK_MODEL && GEMINI_FALLBACK_MODEL !== GEMINI_MODEL
+        ? [GEMINI_MODEL, GEMINI_FALLBACK_MODEL]
+        : [GEMINI_MODEL];
+    let lastErr: unknown;
+    let got: AnswerResult | null = null;
+    model = models[0];
+    for (let i = 0; i < models.length; i++) {
+      model = models[i];
+      try {
+        const response = await withRetry(() =>
+          getGemini().models.generateContent({
+            model,
+            contents: `${context}\n\nQuestion: ${question}`,
+            config: {
+              systemInstruction: ASK_SYSTEM,
+              responseMimeType: "application/json",
+              responseSchema: GEMINI_ANSWER_SCHEMA,
+            },
+          }),
+        );
+        const text = response.text;
+        if (!text) throw new Error("Gemini returned no content.");
+        got = AnswerSchema.parse(JSON.parse(text));
+        break;
+      } catch (err) {
+        lastErr = err;
+        if ((isTransientError(err) || isRateLimitError(err)) && i < models.length - 1) continue;
+        throw err;
+      }
+    }
+    if (!got) throw lastErr;
+    result = got;
+  } else {
+    model = ANTHROPIC_MODEL;
+    const response = await getAnthropic().messages.parse({
+      model: ANTHROPIC_MODEL,
+      max_tokens: 2000,
+      system: [
+        { type: "text", text: context, cache_control: { type: "ephemeral" } },
+        { type: "text", text: ASK_SYSTEM },
+      ],
+      output_config: { format: zodOutputFormat(AnswerSchema) },
+      messages: [{ role: "user", content: question }],
+    });
+    if (!response.parsed_output) throw new Error("Model did not return structured output.");
+    result = response.parsed_output;
+  }
+
+  result.startTime = quoteToSeconds(transcript, result.quote);
+  return { result, model };
 }
