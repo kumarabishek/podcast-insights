@@ -184,7 +184,7 @@ export default function Home() {
   const needsToken = !!TURNSTILE_SITE_KEY && !token;
 
   return (
-    <main className={`mx-auto max-w-2xl px-5 py-12 ${insights ? "pb-40" : ""}`}>
+    <main className={`mx-auto w-full min-w-0 max-w-2xl px-5 py-12 ${insights ? "pb-40" : ""}`}>
       <h1 className="text-3xl font-bold tracking-tight">Podcast Insights Extractor</h1>
       <p className="mt-2 text-sm text-neutral-500">
         Paste a YouTube podcast link to get the key takeaways.

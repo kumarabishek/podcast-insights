@@ -14,7 +14,7 @@ export default async function AdminPage() {
   ]);
 
   return (
-    <main className="mx-auto max-w-3xl px-5 py-12">
+    <main className="mx-auto w-full min-w-0 max-w-3xl px-5 py-12">
       <h1 className="text-2xl font-bold tracking-tight">Admin · Feedback</h1>
       <p className="mt-2 text-sm text-neutral-500">
         {episodeCount} episodes · {jobCount} analyses · {feedback.length} feedback
