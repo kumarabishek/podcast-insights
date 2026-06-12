@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { STYLES, DEFAULT_STYLE, type StyleId } from "@/lib/styles";
 import { TurnstileWidget } from "./TurnstileWidget";
 
-type Insight = { title: string; detail: string; startTime?: number; endTime?: number };
+type Insight = { title: string; detail: string; startTime?: number };
 
 function fmtTime(s: number): string {
   const sec = Math.max(0, Math.floor(s));
@@ -300,7 +300,6 @@ export default function Home() {
                             className="mt-0.5 shrink-0 whitespace-nowrap text-xs font-medium text-blue-600 hover:underline dark:text-blue-400"
                           >
                             ▶ {fmtTime(ins.startTime!)}
-                            {ins.endTime != null ? `–${fmtTime(ins.endTime)}` : ""}
                           </a>
                         )}
                         <span

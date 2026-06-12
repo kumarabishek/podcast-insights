@@ -15,16 +15,19 @@ const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
 const GEMINI_FALLBACK_MODEL = process.env.GEMINI_FALLBACK_MODEL ?? "gemini-2.5-flash-lite";
 const ANTHROPIC_MODEL = process.env.MODEL ?? "claude-sonnet-4-6";
 
+// Schema the MODEL fills. It returns a verbatim `quote`; we compute the
+// timestamp from it ourselves (the model is unreliable at second math).
 const InsightSchema = z.object({
   title: z.string().describe("A short, punchy headline for the insight (≤ 12 words)."),
   detail: z
     .string()
     .describe("1-3 sentences explaining the insight, takeaway, or claim and why it matters."),
-  startTime: z
-    .number()
+  quote: z
+    .string()
     .optional()
-    .describe("Seconds into the episode where this insight starts being discussed."),
-  endTime: z.number().optional().describe("Seconds into the episode where the discussion ends."),
+    .describe(
+      "A SHORT phrase (5-12 words) copied EXACTLY, word-for-word, from the transcript at the moment this insight is discussed. Do not paraphrase. Omit if none fits.",
+    ),
 });
 
 const InsightResultSchema = z.object({
@@ -34,7 +37,9 @@ const InsightResultSchema = z.object({
     .describe("The most important, non-obvious insights and takeaways, ordered by significance."),
 });
 
-export type InsightResult = z.infer<typeof InsightResultSchema>;
+// Stored shape adds startTime (seconds), computed server-side from `quote`.
+export type Insight = z.infer<typeof InsightSchema> & { startTime?: number };
+export type InsightResult = { summary: string; insights: Insight[] };
 
 // One system prompt per depth/style. The user picks which in the UI.
 const PROMPTS: Record<StyleId, string> = {
@@ -69,11 +74,71 @@ Rules:
 - 6-12 insights, ordered by significance.`,
 };
 
-// Appended to every prompt. Drives the per-insight time range.
-const TIMESTAMP_NOTE = `The transcript is annotated with [m:ss] timestamps marking when each part was spoken. For every insight, also set startTime and endTime to the integer number of SECONDS marking the span of the episode where that insight is discussed, using the surrounding timestamps (e.g. [12:30] → 750). If the transcript has no timestamps, omit startTime and endTime.`;
+// Appended to every prompt. We resolve the timestamp from the quote ourselves,
+// so accuracy depends only on the quote being copied verbatim.
+const QUOTE_NOTE = `The transcript may be annotated with [m:ss] timestamps. For every insight, include a "quote": a short phrase (5-12 words) copied EXACTLY and word-for-word from the transcript text, in the SAME language as the transcript, taken from the exact moment that insight is discussed. Do NOT include the [m:ss] marker in the quote, do NOT paraphrase, do NOT translate, and do NOT invent text — copy real words verbatim so the moment can be located. Omit the quote only if no suitable verbatim phrase exists.`;
 
 function promptFor(style: StyleId): string {
-  return `${PROMPTS[style]}\n\n${TIMESTAMP_NOTE}`;
+  return `${PROMPTS[style]}\n\n${QUOTE_NOTE}`;
+}
+
+// --- Timestamp resolution (verbatim-quote → seconds) -------------------------
+
+function normalizeText(s: string): string {
+  // Unicode-aware: keep letters/numbers of ANY script (Arabic, CJK, etc.),
+  // drop punctuation, collapse whitespace.
+  return s
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+type TimedLine = { sec: number; norm: string };
+
+function parseTimedLines(transcript: string): TimedLine[] {
+  const lines: TimedLine[] = [];
+  for (const raw of transcript.split("\n")) {
+    const m = raw.match(/^\[(\d+):(\d{2})\]\s*(.*)$/);
+    if (m) lines.push({ sec: parseInt(m[1], 10) * 60 + parseInt(m[2], 10), norm: normalizeText(m[3]) });
+  }
+  return lines;
+}
+
+function findQuoteSec(lines: TimedLine[], quoteNorm: string): number | null {
+  if (quoteNorm.length < 6) return null;
+  // 1) exact phrase within one ~30s line
+  for (const l of lines) if (l.norm.includes(quoteNorm)) return l.sec;
+  // 2) phrase spanning a line boundary
+  for (let i = 0; i < lines.length - 1; i++) {
+    if (`${lines[i].norm} ${lines[i + 1].norm}`.includes(quoteNorm)) return lines[i].sec;
+  }
+  // 3) fall back to the first 6 words of the quote
+  const short = quoteNorm.split(" ").slice(0, 6).join(" ");
+  if (short.length >= 10 && short !== quoteNorm) {
+    for (const l of lines) if (l.norm.includes(short)) return l.sec;
+    for (let i = 0; i < lines.length - 1; i++) {
+      if (`${lines[i].norm} ${lines[i + 1].norm}`.includes(short)) return lines[i].sec;
+    }
+  }
+  return null;
+}
+
+/**
+ * Compute each insight's startTime by locating its verbatim quote in the timed
+ * transcript. We never trust a model-supplied number — if the quote can't be
+ * found (or the transcript has no timestamps), we leave startTime unset so the
+ * UI shows no (potentially wrong) link.
+ */
+export function resolveInsightTimestamps(transcript: string, insights: Insight[]): void {
+  const lines = parseTimedLines(transcript);
+  const maxSec = lines.length ? lines[lines.length - 1].sec : 0;
+  for (const ins of insights) {
+    ins.startTime = undefined;
+    if (!lines.length || !ins.quote) continue;
+    const sec = findQuoteSec(lines, normalizeText(ins.quote));
+    if (sec != null) ins.startTime = Math.min(sec, maxSec);
+  }
 }
 
 /** Insights are stored per video keyed by style: { A: {...}, B: {...} }. */
@@ -143,9 +208,13 @@ export async function extractInsights(
   meta: { title: string; channel: string },
   style: StyleId,
 ): Promise<{ result: InsightResult; model: string }> {
-  return PROVIDER === "gemini"
-    ? extractWithGemini(transcript, meta, style)
-    : extractWithClaude(transcript, meta, style);
+  const out =
+    PROVIDER === "gemini"
+      ? await extractWithGemini(transcript, meta, style)
+      : await extractWithClaude(transcript, meta, style);
+  // Compute trustworthy timestamps from each insight's verbatim quote.
+  resolveInsightTimestamps(transcript, out.result.insights);
+  return out;
 }
 
 // --- Gemini ------------------------------------------------------------------
@@ -162,11 +231,10 @@ const GEMINI_SCHEMA = {
         properties: {
           title: { type: Type.STRING },
           detail: { type: Type.STRING },
-          startTime: { type: Type.INTEGER },
-          endTime: { type: Type.INTEGER },
+          quote: { type: Type.STRING },
         },
         required: ["title", "detail"],
-        propertyOrdering: ["title", "detail", "startTime", "endTime"],
+        propertyOrdering: ["title", "detail", "quote"],
       },
     },
   },
