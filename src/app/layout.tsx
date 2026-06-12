@@ -13,6 +13,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL(
+    process.env.NEXT_PUBLIC_SITE_URL ?? "https://podcast-insightcribe.vercel.app",
+  ),
   title: "Podcast Insights Extractor",
   description:
     "Paste a YouTube podcast link and get the key takeaways in seconds — actionable, in-depth, or brief. Skip the hours of listening.",
