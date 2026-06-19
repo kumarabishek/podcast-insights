@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { track } from "@vercel/analytics";
 import { STYLES, DEFAULT_STYLE, type StyleId } from "@/lib/styles";
 import { TurnstileWidget } from "./TurnstileWidget";
 
@@ -97,16 +98,19 @@ export default function Home() {
         if (data.status === "pending" || data.status === "processing") {
           pollRef.current = setTimeout(tick, 2000);
         } else if (data.status === "done") {
+          track("analysis_completed", { style });
           loadTop(); // refresh the weekly leaderboard
+        } else {
+          track("analysis_failed", { reason: data.status });
         }
       };
       tick();
     },
-    [loadTop],
+    [loadTop, style],
   );
 
   const analyze = useCallback(
-    async (targetUrl: string) => {
+    async (targetUrl: string, source: "manual" | "leaderboard" = "manual") => {
       if (pollRef.current) clearTimeout(pollRef.current);
       setError(null);
       setJob(null);
@@ -126,6 +130,7 @@ export default function Home() {
           setError(data.error ?? "Something went wrong.");
           return;
         }
+        track("analysis_submitted", { style, source });
         poll(data.jobId);
       } catch {
         setError("Network error. Please try again.");
@@ -168,6 +173,7 @@ export default function Home() {
         return;
       }
       setAnswer({ answer: data.answer, startTime: data.startTime ?? null });
+      track("question_asked");
     } catch {
       setAskError("Network error. Please try again.");
     } finally {
@@ -379,7 +385,7 @@ export default function Home() {
                   type="button"
                   onClick={() => {
                     setUrl(t.url);
-                    analyze(t.url);
+                    analyze(t.url, "leaderboard");
                   }}
                   className="flex w-full items-center gap-3 rounded-lg p-2 text-left hover:bg-neutral-100 dark:hover:bg-neutral-900"
                 >
@@ -489,6 +495,7 @@ function FeedbackSection() {
       });
       setState(res.ok ? "sent" : "error");
       if (res.ok) {
+        track("feedback_submitted");
         setMessage("");
         setEmail("");
       }
