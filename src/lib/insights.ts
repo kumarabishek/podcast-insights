@@ -26,7 +26,7 @@ const InsightSchema = z.object({
     .string()
     .optional()
     .describe(
-      "A SHORT phrase (5-12 words) copied EXACTLY, word-for-word, from the transcript at the moment this insight is discussed. Do not paraphrase. Omit if none fits.",
+      "A SHORT phrase (5-12 words) copied EXACTLY, word-for-word, from the transcript where this insight is FIRST introduced or most substantively discussed — not a later recap or callback. Do not paraphrase. Omit if none fits.",
     ),
 });
 
@@ -84,7 +84,7 @@ Rules:
 
 // Appended to every prompt. We resolve the timestamp from the quote ourselves,
 // so accuracy depends only on the quote being copied verbatim.
-const QUOTE_NOTE = `The transcript may be annotated with [m:ss] timestamps. For every insight, include a "quote": a short phrase (5-12 words) copied EXACTLY and word-for-word from the transcript text, in the SAME language as the transcript, taken from the exact moment that insight is discussed. Do NOT include the [m:ss] marker in the quote, do NOT paraphrase, do NOT translate, and do NOT invent text — copy real words verbatim so the moment can be located. Omit the quote only if no suitable verbatim phrase exists.`;
+const QUOTE_NOTE = `The transcript may be annotated with [m:ss] timestamps. For every insight, include a "quote": a short phrase (5-12 words) copied EXACTLY and word-for-word from the transcript text, in the SAME language as the transcript. Take the quote from where the insight is FIRST introduced or most substantively discussed — the moment that best supports it — NOT a later passing mention, recap, or rhetorical callback. When the idea recurs, prefer the earliest substantive occurrence. Do NOT include the [m:ss] marker in the quote, do NOT paraphrase, do NOT translate, and do NOT invent text — copy real words verbatim so the moment can be located. Omit the quote only if no suitable verbatim phrase exists.`;
 
 function promptFor(style: StyleId): string {
   return `${PROMPTS[style]}\n\n${QUOTE_NOTE}`;
@@ -115,23 +115,49 @@ function parseTimedLines(transcript: string): TimedLine[] {
 
 function findQuoteSec(lines: TimedLine[], quoteNorm: string): number | null {
   if (quoteNorm.length < 6) return null;
+
+  // The opening line is frequently a cold-open teaser montage that splices in
+  // clips of phrases discussed much later, so a quote often matches there even
+  // though the real moment is further in. We defer any teaser-only (line 0)
+  // match and keep searching later/looser tiers; the teaser is used only as a
+  // last resort, so the link lands on the substantive moment instead of 0:00.
+  let teaserSec: number | null = null;
+  // Resolve matching line indices (transcript order) to a sec: return the first
+  // non-teaser match, else record the teaser as a fallback and signal "keep
+  // looking" (null) so a later tier can override it.
+  const resolve = (idxs: number[]): number | null => {
+    const nonTeaser = idxs.find((i) => i !== 0);
+    if (nonTeaser !== undefined) return lines[nonTeaser].sec;
+    if (idxs.length && teaserSec === null) teaserSec = lines[0].sec;
+    return null;
+  };
+  const matches = (pred: (i: number) => boolean): number[] => {
+    const out: number[] = [];
+    for (let i = 0; i < lines.length; i++) if (pred(i)) out.push(i);
+    return out;
+  };
+  const inLine = (q: string) => (i: number) => lines[i].norm.includes(q);
+  const spansBoundary = (q: string) => (i: number) =>
+    i < lines.length - 1 && `${lines[i].norm} ${lines[i + 1].norm}`.includes(q);
+
   // 1) exact phrase within one ~30s line
-  for (const l of lines) if (l.norm.includes(quoteNorm)) return l.sec;
+  let sec = resolve(matches(inLine(quoteNorm)));
+  if (sec !== null) return sec;
   // 2) phrase spanning a line boundary
-  for (let i = 0; i < lines.length - 1; i++) {
-    if (`${lines[i].norm} ${lines[i + 1].norm}`.includes(quoteNorm)) return lines[i].sec;
-  }
+  sec = resolve(matches(spansBoundary(quoteNorm)));
+  if (sec !== null) return sec;
   // 3) fall back to the first 6 words of the quote
   const short = quoteNorm.split(" ").slice(0, 6).join(" ");
   if (short.length >= 10 && short !== quoteNorm) {
-    for (const l of lines) if (l.norm.includes(short)) return l.sec;
-    for (let i = 0; i < lines.length - 1; i++) {
-      if (`${lines[i].norm} ${lines[i + 1].norm}`.includes(short)) return lines[i].sec;
-    }
+    sec = resolve(matches(inLine(short)));
+    if (sec !== null) return sec;
+    sec = resolve(matches(spansBoundary(short)));
+    if (sec !== null) return sec;
   }
 
   // 4) fuzzy: the window covering the most of the quote's words (≥60%).
   // Tolerates minor paraphrasing while still landing on the right segment.
+  // Skip the teaser line here too so the montage can't outscore the real spot.
   const qTokens = quoteNorm.split(" ").filter((w) => w.length >= 3);
   if (qTokens.length >= 3) {
     let bestSec = -1;
@@ -146,13 +172,14 @@ function findQuoteSec(lines: TimedLine[], quoteNorm: string): number | null {
         bestSec = sec;
       }
     };
-    for (const l of lines) consider(l.norm, l.sec);
-    for (let i = 0; i < lines.length - 1; i++) {
+    for (let i = 1; i < lines.length; i++) consider(lines[i].norm, lines[i].sec);
+    for (let i = 1; i < lines.length - 1; i++) {
       consider(`${lines[i].norm} ${lines[i + 1].norm}`, lines[i].sec);
     }
     if (bestScore >= 0.6) return bestSec;
   }
-  return null;
+  // Nothing better than the opening teaser (if even that matched).
+  return teaserSec;
 }
 
 /**
