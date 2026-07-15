@@ -51,20 +51,36 @@ export async function POST(request: Request) {
   if (!videoId) return Response.json({ error: "Could not parse a YouTube video ID from that URL." }, { status: 400 });
 
   // Cache hit: this video already analyzed at this style → return a done job.
-  // Free, so it bypasses the rate limit and is recorded as cached.
+  // Free, so it bypasses the rate limit and is recorded as cached. Reuse a
+  // recent cached job for the same IP instead of creating a row per
+  // re-submission, so free requests can't grow the table (or the
+  // leaderboard) without bound.
   const existing = await prisma.episode.findUnique({ where: { videoId } });
   if (existing && parseInsightsMap(existing.insights)[style]) {
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const prior = await prisma.job.findFirst({
+      where: { videoId, style, cached: true, ip: ip ?? null, createdAt: { gte: since } },
+      orderBy: { createdAt: "desc" },
+    });
+    if (prior) return Response.json({ jobId: prior.id, cached: true });
     const job = await prisma.job.create({
       data: { videoId, url, style, status: "done", episodeId: existing.id, cached: true, ip },
     });
     return Response.json({ jobId: job.id, cached: true });
   }
 
-  // Rate limit: cap NEW analyses per IP per rolling 24h (cache hits excluded).
+  // Rate limit: cap NEW analyses per IP per rolling 24h. Cache hits and
+  // failed attempts (no captions, provider errors) don't count — only jobs
+  // that did or may still do LLM work.
   if (ip && DAILY_IP_LIMIT > 0 && !EXEMPT_IPS.has(ip)) {
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const used = await prisma.job.count({
-      where: { ip, cached: false, createdAt: { gte: since } },
+      where: {
+        ip,
+        cached: false,
+        createdAt: { gte: since },
+        status: { notIn: ["error", "needs_audio", "rate_limited"] },
+      },
     });
     if (used >= DAILY_IP_LIMIT) {
       return Response.json(

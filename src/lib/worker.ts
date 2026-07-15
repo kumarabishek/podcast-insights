@@ -41,13 +41,18 @@ export async function processJob(jobId: string): Promise<void> {
       style,
     );
 
-    // Merge this style's result into the per-style map.
-    const map = parseInsightsMap(episode.insights);
-    map[style] = result;
-
-    await prisma.episode.update({
-      where: { videoId: job.videoId },
-      data: { insights: JSON.stringify(map), model },
+    // Merge this style's result into the per-style map. Lock the row for the
+    // read-merge-write so concurrent jobs (same video, different styles)
+    // can't clobber each other's entry.
+    await prisma.$transaction(async (tx) => {
+      const [row] = await tx.$queryRaw<{ insights: string | null }[]>`
+        SELECT "insights" FROM "Episode" WHERE "videoId" = ${job.videoId} FOR UPDATE`;
+      const map = parseInsightsMap(row?.insights ?? null);
+      map[style] = result;
+      await tx.episode.update({
+        where: { videoId: job.videoId },
+        data: { insights: JSON.stringify(map), model },
+      });
     });
     await prisma.job.update({
       where: { id: jobId },

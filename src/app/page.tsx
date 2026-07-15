@@ -91,17 +91,47 @@ export default function Home() {
 
   const poll = useCallback(
     (jobId: string) => {
+      const startedAt = Date.now();
+      const MAX_POLL_MS = 5 * 60 * 1000; // the worker is long dead by then
+      let failures = 0;
+
+      // Terminal poll failure: drop the half-rendered job and show the error.
+      const giveUp = (message: string) => {
+        setJob(null);
+        setError(message);
+      };
+
       const tick = async () => {
-        const res = await fetch(`/api/jobs/${jobId}`);
-        const data: JobResponse = await res.json();
-        setJob(data);
-        if (data.status === "pending" || data.status === "processing") {
+        try {
+          const res = await fetch(`/api/jobs/${jobId}`);
+          const data: JobResponse & { error?: string } = await res.json();
+          if (!res.ok) {
+            giveUp(data.error ?? "Something went wrong.");
+            return;
+          }
+          failures = 0;
+          setJob(data);
+          if (data.status === "pending" || data.status === "processing") {
+            if (Date.now() - startedAt > MAX_POLL_MS) {
+              track("analysis_failed", { reason: "poll_timeout" });
+              giveUp("This is taking longer than expected. Please try again in a bit.");
+              return;
+            }
+            pollRef.current = setTimeout(tick, 2000);
+          } else if (data.status === "done") {
+            track("analysis_completed", { style });
+            loadTop(); // refresh the weekly leaderboard
+          } else {
+            track("analysis_failed", { reason: data.status });
+          }
+        } catch {
+          // Transient network hiccup — keep polling, but not forever.
+          failures += 1;
+          if (failures >= 5) {
+            giveUp("Lost connection. Please try again.");
+            return;
+          }
           pollRef.current = setTimeout(tick, 2000);
-        } else if (data.status === "done") {
-          track("analysis_completed", { style });
-          loadTop(); // refresh the weekly leaderboard
-        } else {
-          track("analysis_failed", { reason: data.status });
         }
       };
       tick();
