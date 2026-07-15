@@ -13,6 +13,7 @@ export async function GET(request: Request) {
     hasGemini: !!process.env.GEMINI_API_KEY,
     hasAnthropic: !!process.env.ANTHROPIC_API_KEY,
     hasSupadata: !!process.env.SUPADATA_API_KEY,
+    hasTurnstile: !!(process.env.TURNSTILE_SECRET_KEY && process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY),
     hasDb: !!(
       process.env.DATABASE_URL ??
       process.env.POSTGRES_PRISMA_URL ??
