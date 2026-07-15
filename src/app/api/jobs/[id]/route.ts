@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
-import { parseInsightsMap } from "@/lib/insights";
+import { parseInsightsMap, sortInsightsByTime } from "@/lib/insights";
 import { isStyleId } from "@/lib/styles";
 
 /**
@@ -18,6 +18,13 @@ export async function GET(_req: NextRequest, ctx: RouteContext<"/api/jobs/[id]">
 
   const style = isStyleId(job.style) ? job.style : "A";
 
+  // Present insights in episode order (timestamps ascending); they're stored
+  // by significance, which reads as jumbled next to the ▶ time links.
+  const stored = episode ? parseInsightsMap(episode.insights)[style] : null;
+  const insights = stored
+    ? { ...stored, insights: sortInsightsByTime(stored.insights) }
+    : null;
+
   return Response.json({
     id: job.id,
     status: job.status,
@@ -30,7 +37,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext<"/api/jobs/[id]">
           title: episode.title,
           channel: episode.channel,
           thumbnail: episode.thumbnail,
-          insights: parseInsightsMap(episode.insights)[style] ?? null,
+          insights,
         }
       : null,
   });

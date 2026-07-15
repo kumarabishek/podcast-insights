@@ -208,6 +208,17 @@ function quoteToSeconds(transcript: string, quote: string | undefined): number |
   return sec == null ? undefined : Math.min(sec, lines[lines.length - 1].sec);
 }
 
+/**
+ * Chronological display order: resolved timestamps ascending. Insights whose
+ * quote couldn't be located (no startTime) keep their significance order at
+ * the end. Sort is stable, so ties preserve significance order too.
+ */
+export function sortInsightsByTime(insights: Insight[]): Insight[] {
+  return [...insights].sort(
+    (a, b) => (a.startTime ?? Number.MAX_SAFE_INTEGER) - (b.startTime ?? Number.MAX_SAFE_INTEGER),
+  );
+}
+
 /** Insights are stored per video keyed by style: { A: {...}, B: {...} }. */
 export type InsightsByStyle = Partial<Record<StyleId, InsightResult>>;
 
